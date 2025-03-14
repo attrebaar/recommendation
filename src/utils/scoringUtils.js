@@ -1,7 +1,7 @@
-// src\utils\scoringUtils.js
+// src/utils/scoringUtils.js
 
 // Import the location utilities
-const { calculateLocationScore } = require('./locationUtils');
+const { calculateLocationScore: calculateDistrictLocationScore } = require('./locationUtils');
 
 /**
  * Map education array value to category
@@ -39,54 +39,94 @@ const mapOccupationToCategory = (occupationValue) => {
  * Calculate age score based on user's age and match's age
  * @param {number} userAge - Age of the user
  * @param {number} matchAge - Age of the potential match
- * @returns {number} - Score between 0 and 1
+ * @param {string} userGender - Gender of the user
+ * @param {string} matchGender - Gender of the potential match
+ * @returns {number} - Score between 0 and 5
  */
-const calculateAgeScore = (userAge, matchAge) => {
-  // Default age preference: within 5 years of user's age
-  const preferredMinAge = Math.max(18, userAge - 5);
-  const preferredMaxAge = userAge + 5;
+const calculateAgeScore = (userAge, matchAge, userGender, matchGender) => {
+  // Default score if gender information is missing
+  if (!userGender || !matchGender) return 3; // Default moderate score
   
-  // Exact match gets perfect score
-  if (matchAge === userAge) return 1;
-  
-  // Within preferred range gets good score
-  if (matchAge >= preferredMinAge && matchAge <= preferredMaxAge) {
-    // Calculate how close the match is to user's age within the range
-    const rangeSize = preferredMaxAge - preferredMinAge;
-    const distanceFromUser = Math.abs(userAge - matchAge);
-    return 1 - (distanceFromUser / (rangeSize + 1));
+  // Apply the male-female age difference logic
+  if (userGender === 'male' && matchGender === 'female') {
+    const ageDifference = userAge - matchAge;
+    
+    // Apply the scoring logic based on the table provided
+    if (ageDifference < -2) {
+      return 0; // Score: 0
+    } else if (ageDifference >= -2 && ageDifference < 0) {
+      return 2; // Score: 2
+    } else if (ageDifference === 0) {
+      return 4; // Score: 4
+    } else if (ageDifference >= 1 && ageDifference <= 5) {
+      return 5; // Score: 5
+    } else if (ageDifference > 5 && ageDifference <= 8) {
+      return 4; // Score: 4
+    } else if (ageDifference > 8 && ageDifference <= 12) {
+      return 3; // Score: 3
+    } else if (ageDifference > 12) {
+      return 1; // Score: 1
+    }
+  } 
+  // For other gender combinations, we might want to define different rules
+  else {
+    // Exact match gets high score
+    if (userAge === matchAge) return 4;
+    
+    // Reasonable age difference (within 5 years) gets moderate score
+    const ageDifference = Math.abs(userAge - matchAge);
+    if (ageDifference <= 5) {
+      return 3;
+    }
+    
+    // Larger differences get lower scores
+    return Math.max(0, 2 - Math.floor(ageDifference / 5));
   }
-  
-  // Outside preferred range gets lower score based on how far outside
-  const distanceOutsideRange = matchAge < preferredMinAge 
-    ? preferredMinAge - matchAge 
-    : matchAge - preferredMaxAge;
-  
-  return Math.max(0, 1 - (distanceOutsideRange / 10));
 };
 
 /**
  * Calculate income score based on user's income and match's income
+ * Updated rules:
+ * - If male income >= Female income: score 5
+ * - If male income < Female income: score 0
+ * - If male income = 0 AND female income = ANY: score 0
+ * - If female income = 0 AND male income = ANY: score 5
+ * 
  * @param {number} userIncome - Income of the user
  * @param {number} matchIncome - Income of the potential match
- * @returns {number} - Score between 0 and 1
+ * @param {string} userGender - Gender of the user
+ * @param {string} matchGender - Gender of the match
+ * @returns {number} - Score between 0 and 5
  */
-const calculateIncomeScore = (userIncome, matchIncome) => {
-  // If no income data is available, return neutral score
-  if (userIncome === 0 && matchIncome === 0) return 0.5;
-  
-  // If one is 0, assume it's not provided
-  if (userIncome === 0 || matchIncome === 0) return 0.5;
-  
-  // Higher income gets better score, with diminishing returns
-  if (matchIncome >= userIncome) {
-    // Cap the benefit at 2x user's income
-    const ratio = Math.min(matchIncome / userIncome, 2);
-    return 0.7 + (0.3 * (ratio - 1));
+const calculateIncomeScore = (userIncome, matchIncome, userGender, matchGender) => {
+  // Special cases for missing income data
+  if (userGender === 'male') {
+    // Male user
+    if (userIncome === 0) {
+      // Male user has no income data
+      return 0;
+    } else if (matchIncome === 0) {
+      // Female match has no income data
+      return 5;
+    } else {
+      // Both have income data
+      return userIncome >= matchIncome ? 5 : 0;
+    }
+  } else if (userGender === 'female') {
+    // Female user
+    if (userIncome === 0) {
+      // Female user has no income data
+      return 5;
+    } else if (matchIncome === 0) {
+      // Male match has no income data
+      return 0;
+    } else {
+      // Both have income data
+      return matchIncome >= userIncome ? 5 : 0;
+    }
   } else {
-    // Lower income gets lower score, but not too harshly
-    const ratio = matchIncome / userIncome;
-    return 0.7 * ratio;
+    // For other gender combinations, return a neutral score
+    return 3;
   }
 };
 
@@ -96,11 +136,11 @@ const calculateIncomeScore = (userIncome, matchIncome) => {
  * @param {number} userEducation - User's education code
  * @param {string} matchGender - Match's gender
  * @param {number} matchEducation - Match's education code
- * @returns {number} - Score between 0 and 1 (normalized from 1-5 scale)
+ * @returns {number} - Score between 1 and 5
  */
 const calculateEducationScore = (userGender, userEducation, matchGender, matchEducation) => {
   // If education info is missing, return neutral score
-  if (!userEducation || !matchEducation) return 0.5;
+  if (!userEducation || !matchEducation) return 3;
   
   const userCategory = mapEducationToCategory(userEducation);
   const matchCategory = mapEducationToCategory(matchEducation);
@@ -129,8 +169,7 @@ const calculateEducationScore = (userGender, userEducation, matchGender, matchEd
     }
   }
   
-  // Normalize score from 1-5 scale to 0-1 scale
-  return score / 5;
+  return score;
 };
 
 /**
@@ -139,11 +178,11 @@ const calculateEducationScore = (userGender, userEducation, matchGender, matchEd
  * @param {number} userOccupation - User's occupation code
  * @param {string} matchGender - Match's gender
  * @param {number} matchOccupation - Match's occupation code
- * @returns {number} - Score between 0 and 1 (normalized from 1-5 scale)
+ * @returns {number} - Score between 1 and 5
  */
 const calculateOccupationScore = (userGender, userOccupation, matchGender, matchOccupation) => {
   // If occupation info is missing, return neutral score
-  if (userOccupation == null || matchOccupation == null) return 0.5;
+  if (userOccupation == null || matchOccupation == null) return 3;
   
   const userCategory = mapOccupationToCategory(userOccupation);
   const matchCategory = mapOccupationToCategory(matchOccupation);
@@ -178,296 +217,176 @@ const calculateOccupationScore = (userGender, userOccupation, matchGender, match
     }
   }
   
-  // Normalize score from 1-5 scale to 0-1 scale
-  return score / 5;
+  return score;
 };
 
 /**
- * Calculate profile completeness score
+ * Calculate location score based on location objects with district, state, country
+ * @param {Object} userLocation - User's location object
+ * @param {Object} matchLocation - Match's location object
+ * @returns {number} - Score between 0 and 5
+ */
+const calculateLocationScore = (userLocation, matchLocation) => {
+  // Use the updated location score from locationUtils that returns 0-5 score
+  return calculateDistrictLocationScore(userLocation, matchLocation);
+};
+
+/**
+ * Calculate profile completeness score based on requirements:
+ * - Less than 50%: 0
+ * - Between 51% and 80%: 3
+ * - Between 81% and 95%: 4.5
+ * - Equal to 100%: 5
+ * 
  * @param {Object} user - User object with all profile fields
- * @returns {number} - Score between 0 and 1
+ * @returns {number} - Score between 0 and 5
  */
 const calculateProfileCompletenessScore = (user) => {
-  // For this implementation, we'll just use the precomputed profileCompleteness value
-  // This is because it's already provided in the dataset
+  // Get profile completeness percentage (0-1 scale)
+  let completenessPercentage = 0;
+  
+  // Use the precomputed profileCompleteness value if available
   if (user.profileCompleteness != null) {
-    return user.profileCompleteness;
+    completenessPercentage = user.profileCompleteness;
+  } else {
+    // Fallback - calculate based on fields
+    const essentialFields = [
+      'age', 'income', 'occupation', 'education', 
+      'location', 'photoAvailable'
+    ];
+    
+    // Count how many fields are completed
+    const completedFields = essentialFields.filter(field => {
+      if (!user[field] && user[field] !== 0 && user[field] !== false) return false;
+      
+      // Objects should have required properties
+      if (field === 'location' && typeof user[field] === 'object') {
+        return (user[field].country || user[field].state || user[field].district) || 
+               (user[field].coordinates && user[field].coordinates.length === 2);
+      }
+      
+      return true;
+    });
+    
+    completenessPercentage = completedFields.length / essentialFields.length;
   }
   
-  // Fallback - calculate based on fields
-  const essentialFields = [
-    'age', 'income', 'occupation', 'education', 
-    'location', 'photoAvailable'
-  ];
+  // Convert to percentage (0-100 scale)
+  const percentage = completenessPercentage * 100;
   
-  // Count how many fields are completed
-  const completedFields = essentialFields.filter(field => {
-    if (!user[field] && user[field] !== 0 && user[field] !== false) return false;
-    
-    // Objects should have required properties
-    if (field === 'location' && typeof user[field] === 'object') {
-      return (user[field].country || user[field].state || user[field].district) || 
-             (user[field].coordinates && user[field].coordinates.length === 2);
-    }
-    
-    return true;
-  });
+  // Apply scoring logic
+  if (percentage < 50) {
+    return 0;
+  } else if (percentage >= 50 && percentage <= 80) {
+    return 3;
+  } else if (percentage > 80 && percentage <=95) {
+    return 4.5;
+  } else if (percentage > 95) {
+    return 5;
+  }
   
-  return completedFields.length / essentialFields.length;
+  // Default case (shouldn't happen but just in case)
+  return 0;
 };
 
 /**
- * Calculate last login score (more recent = higher score)
+ * Calculate last login score based on requirements:
+ * - Less than 24 hrs: 5
+ * - Between 24 hrs and 3 days: 4
+ * - Between 4 days and 7 days: 3
+ * - Between 8 days and 30 days: 2
+ * - Between 31 days and 90 days: 1
+ * - >90 days: 0
+ * 
  * @param {Date} lastLogin - Date of last login
- * @returns {number} - Score between 0 and 1
+ * @returns {number} - Score between 0 and 5
  */
 const calculateLastLoginScore = (lastLogin) => {
   if (!lastLogin) return 0;
   
   const now = new Date();
-  const daysSinceLastLogin = (now - new Date(lastLogin)) / (1000 * 60 * 60 * 24);
+  const hoursSinceLastLogin = (now - new Date(lastLogin)) / (1000 * 60 * 60);
+  const daysSinceLastLogin = hoursSinceLastLogin / 24;
   
-  // If logged in today
-  if (daysSinceLastLogin < 1) return 1;
+  // Less than 24 hours
+  if (hoursSinceLastLogin < 24) {
+    return 5;
+  }
   
-  // If logged in within the last week
-  if (daysSinceLastLogin < 7) return 0.8;
+  // Between 24 hours and 3 days
+  if (daysSinceLastLogin >= 1 && daysSinceLastLogin <= 3) {
+    return 4;
+  }
   
-  // If logged in within the last month
-  if (daysSinceLastLogin < 30) return 0.6;
+  // Between 4 days and 7 days
+  if (daysSinceLastLogin >= 4 && daysSinceLastLogin <= 7) {
+    return 3;
+  }
   
-  // If logged in within the last 3 months
-  if (daysSinceLastLogin < 90) return 0.4;
+  // Between 8 days and 30 days
+  if (daysSinceLastLogin >= 8 && daysSinceLastLogin <= 30) {
+    return 2;
+  }
   
-  // If logged in within the last year
-  if (daysSinceLastLogin < 365) return 0.2;
+  // Between 31 days and 90 days
+  if (daysSinceLastLogin >= 31 && daysSinceLastLogin <= 90) {
+    return 1;
+  }
   
-  // If not logged in for over a year
+  // More than 90 days
   return 0;
 };
 
 /**
- * Calculate freshness score (newer profiles = higher score)
+ * Calculate freshness score (newer profiles = higher score):
+ * - Less than 24 hrs: 5
+ * - Between 24 hrs and 3 days: 4
+ * - Between 3 days and 7 days: 3
+ * - Between 7 days and 30 days: 2
+ * - >30 days: 0
+ * 
  * @param {Date} createdAt - Date when the profile was created
- * @returns {number} - Score between 0 and 1
+ * @returns {number} - Score between 0 and 5
  */
 const calculateFreshnessScore = (createdAt) => {
-  if (!createdAt) return 0.5;
+  if (!createdAt) return 0;
   
   const now = new Date();
-  const daysSinceCreation = (now - new Date(createdAt)) / (1000 * 60 * 60 * 24);
+  const hoursSinceCreation = (now - new Date(createdAt)) / (1000 * 60 * 60);
+  const daysSinceCreation = hoursSinceCreation / 24;
   
-  // Profile created within last 7 days
-  if (daysSinceCreation < 7) return 1;
+  // Profile created within last 24 hours
+  if (hoursSinceCreation < 24) {
+    return 5;
+  }
   
-  // Profile created within last month
-  if (daysSinceCreation < 30) return 0.8;
+  // Profile created between 24 hours and 3 days
+  if (daysSinceCreation >= 1 && daysSinceCreation < 3) {
+    return 4;
+  }
   
-  // Profile created within last 3 months
-  if (daysSinceCreation < 90) return 0.6;
+  // Profile created between 3 days and 7 days
+  if (daysSinceCreation >= 3 && daysSinceCreation < 7) {
+    return 3;
+  }
   
-  // Profile created within last 6 months
-  if (daysSinceCreation < 180) return 0.4;
+  // Profile created between 7 days and 30 days
+  if (daysSinceCreation >= 7 && daysSinceCreation < 30) {
+    return 2;
+  }
   
-  // Profile created within last year
-  if (daysSinceCreation < 365) return 0.2;
-  
-  // Profile older than a year
-  return 0.1;
+  // Profile created more than 30 days ago
+  return 0;
 };
 
 /**
  * Calculate photo availability score
  * @param {Boolean} photoAvailable - Whether user has photos
- * @returns {number} - Score between 0 and 1
+ * @returns {number} - Score between 0 and 5
  */
 const calculatePhotoAvailabilityScore = (photoAvailable) => {
-  // Simple boolean check - 1 if photo is available, 0 if not
-  return photoAvailable ? 1 : 0;
-};
-
-/**
- * Calculate matching score based on multiple factors
- * @param {Object} user - User object
- * @param {Object} match - Potential match object
- * @returns {number} - Score between 0 and 1
- */
-const calculateMatchingScore = (user, match) => {
-  // Weights from the document
-  const weights = {
-    age: 0.20,      // A1 = 20%
-    income: 0.15,   // A2 = 15%
-    occupation: 0.15, // A3 = 15%
-    education: 0.20, // A4 = 20%
-    location: 0.30   // A5 = 30%
-  };
-  
-  // Calculate individual scores
-  const ageScore = calculateAgeScore(user.age, match.age);
-  const incomeScore = calculateIncomeScore(user.income, match.income);
-  
-  // For occupation and education, use the scoring functions with gender
-  const occupationScore = calculateOccupationScore(
-    user.gender, 
-    user.occupation, 
-    match.gender, 
-    match.occupation
-  );
-  
-  const educationScore = calculateEducationScore(
-    user.gender, 
-    user.education, 
-    match.gender, 
-    match.education
-  );
-  
-  // Use the new location score calculation
-  const locationScore = calculateLocationScore(user.location, match.location);
-  
-  // Calculate weighted average
-  return (
-    ageScore * weights.age +
-    incomeScore * weights.income +
-    occupationScore * weights.occupation +
-    educationScore * weights.education +
-    locationScore * weights.location
-  );
-};
-
-/**
- * Calculate overall ranking score
- * @param {Object} user - User object
- * @param {Object} match - Potential match object
- * @returns {number} - Final ranking score between 0 and 5
- */
-const calculateRankingScore = (user, match) => {
-  // Weights from the document
-  const weights = {
-    matchingScore: 0.50,           // B1 = 50%
-    profileCompleteness: 0.10,     // B2 = 10%
-    lastLogin: 0.15,               // B3 = 15%
-    freshness: 0.10,               // B4 = 10%
-    photoAvailability: 0.15        // B5 = 15%
-  };
-  
-  // Calculate component scores
-  const matchingScore = calculateMatchingScore(user, match);
-  const profileCompletenessScore = calculateProfileCompletenessScore(match);
-  const lastLoginScore = calculateLastLoginScore(match.lastLogin);
-  const freshnessScore = calculateFreshnessScore(match.createdAt);
-  const photoAvailabilityScore = calculatePhotoAvailabilityScore(match.photoAvailable);
-  
-  // Calculate weighted average (between 0 and 1)
-  const normalizedScore = (
-    matchingScore * weights.matchingScore +
-    profileCompletenessScore * weights.profileCompleteness +
-    lastLoginScore * weights.lastLogin +
-    freshnessScore * weights.freshness +
-    photoAvailabilityScore * weights.photoAvailability
-  );
-  
-  // Return score between 0 and 5
-  return normalizedScore * 5;
-};
-
-// Function to get detailed component scores (for debugging and explanation)
-const getDetailedScores = (user, match) => {
-  // Component weights
-  const componentWeights = {
-    matchingScore: 0.50,           // B1 = 50%
-    profileCompleteness: 0.10,     // B2 = 10%
-    lastLogin: 0.15,               // B3 = 15%
-    freshness: 0.10,               // B4 = 10%
-    photoAvailability: 0.15        // B5 = 15%
-  };
-  
-  const matchingWeights = {
-    age: 0.20,      // A1 = 20%
-    income: 0.15,   // A2 = 15%
-    occupation: 0.15, // A3 = 15%
-    education: 0.20, // A4 = 20%
-    location: 0.30   // A5 = 30%
-  };
-  
-  // Calculate individual scores
-  const ageScore = calculateAgeScore(user.age, match.age);
-  const incomeScore = calculateIncomeScore(user.income, match.income);
-  const occupationScore = calculateOccupationScore(user.gender, user.occupation, match.gender, match.occupation);
-  const educationScore = calculateEducationScore(user.gender, user.education, match.gender, match.education);
-  const locationScore = calculateLocationScore(user.location, match.location);
-  
-  // Calculate matching score from components
-  const matchingScore = (
-    ageScore * matchingWeights.age +
-    incomeScore * matchingWeights.income +
-    occupationScore * matchingWeights.occupation +
-    educationScore * matchingWeights.education +
-    locationScore * matchingWeights.location
-  );
-  
-  // Calculate other main component scores
-  const profileCompletenessScore = calculateProfileCompletenessScore(match);
-  const lastLoginScore = calculateLastLoginScore(match.lastLogin);
-  const freshnessScore = calculateFreshnessScore(match.createdAt);
-  const photoAvailabilityScore = calculatePhotoAvailabilityScore(match.photoAvailable);
-  
-  // Calculate final ranking score
-  const finalScore = (
-    matchingScore * componentWeights.matchingScore +
-    profileCompletenessScore * componentWeights.profileCompleteness +
-    lastLoginScore * componentWeights.lastLogin +
-    freshnessScore * componentWeights.freshness +
-    photoAvailabilityScore * componentWeights.photoAvailability
-  );
-  
-  // Return detailed breakdown
-  return {
-    finalScore: finalScore * 5, // Convert to 0-5 scale
-    componentScores: {
-      matching: {
-        score: matchingScore,
-        weight: componentWeights.matchingScore,
-        components: {
-          age: {
-            score: ageScore,
-            weight: matchingWeights.age
-          },
-          income: {
-            score: incomeScore,
-            weight: matchingWeights.income
-          },
-          occupation: {
-            score: occupationScore,
-            weight: matchingWeights.occupation
-          },
-          education: {
-            score: educationScore,
-            weight: matchingWeights.education
-          },
-          location: {
-            score: locationScore,
-            weight: matchingWeights.location
-          }
-        }
-      },
-      profileCompleteness: {
-        score: profileCompletenessScore,
-        weight: componentWeights.profileCompleteness
-      },
-      lastLogin: {
-        score: lastLoginScore,
-        weight: componentWeights.lastLogin
-      },
-      freshness: {
-        score: freshnessScore,
-        weight: componentWeights.freshness
-      },
-      photoAvailability: {
-        score: photoAvailabilityScore,
-        weight: componentWeights.photoAvailability
-      }
-    }
-  };
+  // Simple boolean check - 5 if photo is available, 0 if not
+  return photoAvailable ? 5 : 0;
 };
 
 module.exports = {
@@ -479,8 +398,5 @@ module.exports = {
   calculateProfileCompletenessScore,
   calculateLastLoginScore,
   calculateFreshnessScore,
-  calculatePhotoAvailabilityScore,
-  calculateMatchingScore,
-  calculateRankingScore,
-  getDetailedScores
+  calculatePhotoAvailabilityScore
 };

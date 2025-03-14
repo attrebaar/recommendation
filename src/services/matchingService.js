@@ -2,17 +2,15 @@
 
 const User = require('../models/User');
 const { 
-  calculateRankingScore, 
-  calculateMatchingScore,
-  calculateProfileCompletenessScore,
-  calculateLastLoginScore,
-  calculateFreshnessScore,
-  calculatePhotoAvailabilityScore,
-  calculateAgeScore,
+  calculateAgeScore, 
   calculateIncomeScore,
   calculateOccupationScore,
   calculateEducationScore,
-  calculateLocationScore
+  calculateLocationScore,
+  calculateProfileCompletenessScore,
+  calculateLastLoginScore,
+  calculateFreshnessScore,
+  calculatePhotoAvailabilityScore
 } = require('../utils/scoringUtils');
 
 /**
@@ -96,7 +94,7 @@ const findPotentialMatches = async (user, filters = {}) => {
  * @returns {Array} - Ranked matches with detailed scores
  */
 const rankMatchesWithDetails = (user, matches, preferences = {}) => {
-  // Define component weights
+  // Define component weights - using original weights
   const componentWeights = {
     matchingScore: 0.50,           // B1 = 50%
     profileCompleteness: 0.10,     // B2 = 10%
@@ -115,40 +113,41 @@ const rankMatchesWithDetails = (user, matches, preferences = {}) => {
   
   // Calculate ranking score for each match with component breakdowns
   const rankedMatches = matches.map(match => {
-    // Calculate main component scores
-    const ageScore = calculateAgeScore(user.age, match.age, preferences);
-    const incomeScore = calculateIncomeScore(user.income, match.income, preferences);
+    // Calculate main component scores - all functions return raw scores (0-5 scale)
+    const ageScore = calculateAgeScore(user.age, match.age, user.gender, match.gender);
+    const incomeScore = calculateIncomeScore(user.income, match.income, user.gender, match.gender);
     const occupationScore = calculateOccupationScore(user.gender, user.occupation, match.gender, match.occupation);
     const educationScore = calculateEducationScore(user.gender, user.education, match.gender, match.education);
-    const locationScore = calculateLocationScore(user.location, match.location, preferences);
+    const locationScore = calculateLocationScore(user.location, match.location);
     
-    // Calculate matching score from components
-    const matchingScore = (
-      ageScore * matchingWeights.age +
-      incomeScore * matchingWeights.income +
-      occupationScore * matchingWeights.occupation +
-      educationScore * matchingWeights.education +
-      locationScore * matchingWeights.location
-    );
-    
-    // Calculate other main component scores
+    // Calculate other main component scores (now all return 0-5 scale)
     const profileCompletenessScore = calculateProfileCompletenessScore(match);
     const lastLoginScore = calculateLastLoginScore(match.lastLogin);
     const freshnessScore = calculateFreshnessScore(match.createdAt);
     const photoAvailabilityScore = calculatePhotoAvailabilityScore(match.photoAvailable);
     
+    // Calculate weighted matching score - normalize scores for calculation
+    const matchingScore = (
+      (ageScore / 5) * matchingWeights.age +
+      (incomeScore / 5) * matchingWeights.income +
+      (occupationScore / 5) * matchingWeights.occupation +
+      (educationScore / 5) * matchingWeights.education +
+      (locationScore / 5) * matchingWeights.location
+    );
+    
     // Calculate final ranking score
     const finalScore = (
       matchingScore * componentWeights.matchingScore +
-      profileCompletenessScore * componentWeights.profileCompleteness +
-      lastLoginScore * componentWeights.lastLogin +
-      freshnessScore * componentWeights.freshness +
-      photoAvailabilityScore * componentWeights.photoAvailability
+      (profileCompletenessScore / 5) * componentWeights.profileCompleteness +
+      (lastLoginScore / 5) * componentWeights.lastLogin +
+      (freshnessScore / 5) * componentWeights.freshness +
+      (photoAvailabilityScore / 5) * componentWeights.photoAvailability
     );
     
     // Return detailed breakdown
     return {
       matriid: match.matriid,
+      name: match.name || 'User-' + match.matriid.substring(0, 4),
       age: match.age,
       education: match.education,
       occupation: match.occupation,
@@ -158,48 +157,48 @@ const rankMatchesWithDetails = (user, matches, preferences = {}) => {
         country: match.location.country
       },
       photoAvailable: match.photoAvailable,
-      finalScore: finalScore * 5, // Convert to 0-5 scale
+      finalScore: (finalScore * 5).toFixed(2), // Convert to 0-5 scale and round
       componentScores: {
         matching: {
-          score: matchingScore,
+          score: (matchingScore * 5).toFixed(2), // Convert to 0-5 scale
           weight: componentWeights.matchingScore,
           components: {
             age: {
-              score: ageScore,
+              score: ageScore, // Raw score (0-5)
               weight: matchingWeights.age
             },
             income: {
-              score: incomeScore,
+              score: incomeScore, // Raw score (0-5)
               weight: matchingWeights.income
             },
             occupation: {
-              score: occupationScore,
+              score: occupationScore, // Raw score (0-5)
               weight: matchingWeights.occupation
             },
             education: {
-              score: educationScore,
+              score: educationScore, // Raw score (0-5)
               weight: matchingWeights.education
             },
             location: {
-              score: locationScore,
+              score: locationScore, // Raw score (0-5)
               weight: matchingWeights.location
             }
           }
         },
         profileCompleteness: {
-          score: profileCompletenessScore,
+          score: profileCompletenessScore, // Now on 0-5 scale
           weight: componentWeights.profileCompleteness
         },
         lastLogin: {
-          score: lastLoginScore,
+          score: lastLoginScore, // Now on 0-5 scale
           weight: componentWeights.lastLogin
         },
         freshness: {
-          score: freshnessScore,
+          score: freshnessScore, // Now on 0-5 scale
           weight: componentWeights.freshness
         },
         photoAvailability: {
-          score: photoAvailabilityScore,
+          score: photoAvailabilityScore, // Now on 0-5 scale
           weight: componentWeights.photoAvailability
         }
       }
